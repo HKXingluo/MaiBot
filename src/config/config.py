@@ -24,6 +24,7 @@ from src.config.official_configs import (
     ResponsePostProcessConfig,
     ResponseSplitterConfig,
     TelemetryConfig,
+    PromptConfig,
     ExperimentalConfig,
     MessageReceiveConfig,
     MaimMessageConfig,
@@ -348,6 +349,7 @@ class Config(ConfigBase):
     response_post_process: ResponsePostProcessConfig
     response_splitter: ResponseSplitterConfig
     telemetry: TelemetryConfig
+    prompt: PromptConfig
     webui: WebUIConfig
     experimental: ExperimentalConfig
     maim_message: MaimMessageConfig
