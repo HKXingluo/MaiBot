@@ -37,6 +37,13 @@ class ConfigBase:
                 if f.default is not MISSING or f.default_factory is not MISSING:
                     # 跳过未提供且有默认值/默认构造方法的字段
                     continue
+                # 兼容历史配置：对于嵌套配置对象，若其可无参构造则自动使用默认实例
+                if isinstance(f.type, type) and issubclass(f.type, ConfigBase):
+                    try:
+                        init_args[field_name] = f.type()  # type: ignore[misc]
+                        continue
+                    except Exception:
+                        pass
                 else:
                     raise ValueError(f"Missing required field: '{field_name}'")
 
