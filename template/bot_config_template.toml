@@ -110,6 +110,7 @@ think_mode = "dynamic" # 思考模式，可选：classic（默认浅度思考和
 plan_reply_log_max_per_chat = 1024 # 每个聊天保存最大的Plan/Reply日志数量，超过此数量时会自动删除最老的日志
 
 llm_quote = false # 是否由llm执行引用
+enable_direct_vision_context = false # 是否启用图文直传上下文（Planner + Replyer 直接接收图片，不再仅使用图片描述文本）
 
 enable_talk_value_rules = true # 是否启用动态发言频率规则
 
