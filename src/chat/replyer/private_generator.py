@@ -23,6 +23,7 @@ from src.chat.utils.chat_message_builder import (
     get_raw_msg_before_timestamp_with_chat,
     replace_user_references,
 )
+from src.chat.utils.multimodal_context_builder import build_multimodal_context, make_message_factory
 from src.bw_learner.expression_selector import expression_selector
 from src.plugin_system.apis.message_api import translate_pid_to_description
 
@@ -104,7 +105,7 @@ class PrivateReplyer:
         try:
             # 3. 构建 Prompt
             with Timer("构建Prompt", {}):  # 内部计时器，可选保留
-                prompt, selected_expressions = await self.build_prompt_reply_context(
+                prompt, selected_expressions, multimodal_message_id_list = await self.build_prompt_reply_context(
                     extra_info=extra_info,
                     available_actions=available_actions,
                     chosen_actions=chosen_actions,
@@ -138,7 +139,9 @@ class PrivateReplyer:
 
             try:
                 content, reasoning_content, model_name, tool_call = await self.llm_generate_content(
-                    prompt, preferred_model_name=preferred_model_name
+                    prompt,
+                    preferred_model_name=preferred_model_name,
+                    multimodal_message_id_list=multimodal_message_id_list,
                 )
                 logger.debug(f"replyer生成内容: {content}")
                 llm_response.content = content
@@ -250,7 +253,7 @@ class PrivateReplyer:
 
     async def build_expression_habits(
         self, chat_history: str, target: str, reply_reason: str = ""
-    ) -> Tuple[str, List[int]]:
+    ) -> Tuple[str, List[int], Optional[List[Tuple[str, DatabaseMessages]]]]:
         # sourcery skip: for-append-to-extend
         """构建表达习惯块
 
@@ -663,6 +666,16 @@ class PrivateReplyer:
             limit=global_config.chat.max_context_size,
             filter_intercept_message_level=1,
         )
+        multimodal_message_id_list: Optional[List[Tuple[str, DatabaseMessages]]] = None
+        if global_config.chat.enable_direct_vision_context:
+            multimodal_context = build_multimodal_context(
+                messages=message_list_before_now_long,
+                timestamp_mode="normal_no_YMD",
+                truncate=True,
+                show_actions=False,
+                strict_image=True,
+            )
+            multimodal_message_id_list = multimodal_context.message_id_list
 
         dialogue_prompt = build_readable_messages(
             message_list_before_now_long,
@@ -848,7 +861,7 @@ class PrivateReplyer:
                 moderation_prompt=moderation_prompt_block,
                 memory_retrieval=memory_retrieval,
                 chat_prompt=chat_prompt_block,
-            ), selected_expressions
+            ), selected_expressions, multimodal_message_id_list
         else:
             return await global_prompt_manager.format_prompt(
                 "private_replyer_prompt",
@@ -870,7 +883,7 @@ class PrivateReplyer:
                 memory_retrieval=memory_retrieval,
                 chat_prompt=chat_prompt_block,
                 planner_reasoning=planner_reasoning,
-            ), selected_expressions
+            ), selected_expressions, multimodal_message_id_list
 
     async def build_prompt_rewrite_context(
         self,
@@ -1010,7 +1023,12 @@ class PrivateReplyer:
             display_message=display_message,
         )
 
-    async def llm_generate_content(self, prompt: str, preferred_model_name: Optional[str] = None):
+    async def llm_generate_content(
+        self,
+        prompt: str,
+        preferred_model_name: Optional[str] = None,
+        multimodal_message_id_list: Optional[List[Tuple[str, DatabaseMessages]]] = None,
+    ):
         with Timer("LLM生成", {}):  # 内部计时器，可选保留
             # 直接使用已初始化的模型实例
             logger.info(f"\n{prompt}\n")
@@ -1020,9 +1038,21 @@ class PrivateReplyer:
             else:
                 logger.debug(f"\n{prompt}\n")
 
-            content, (reasoning_content, model_name, tool_calls) = await self.express_model.generate_response_async(
-                prompt, preferred_model_name=preferred_model_name
-            )
+            if global_config.chat.enable_direct_vision_context and multimodal_message_id_list:
+                message_factory = make_message_factory(
+                    system_prompt=prompt,
+                    message_id_list=multimodal_message_id_list,
+                    prefix_text="以下是按时间顺序整理的聊天上下文（包含图片）：\n",
+                    strict_image=True,
+                )
+                content, (reasoning_content, model_name, tool_calls) = await self.express_model.generate_response_with_message_async(
+                    message_factory=message_factory,
+                    preferred_model_name=preferred_model_name,
+                )
+            else:
+                content, (reasoning_content, model_name, tool_calls) = await self.express_model.generate_response_async(
+                    prompt, preferred_model_name=preferred_model_name
+                )
 
             content = content.strip()
 
