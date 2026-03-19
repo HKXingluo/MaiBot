@@ -20,6 +20,7 @@ from src.chat.utils.chat_message_builder import (
     build_readable_messages_with_id,
     get_raw_msg_before_timestamp_with_chat,
 )
+from src.chat.utils.multimodal_context_builder import build_multimodal_context, make_message_factory
 from src.chat.utils.utils import get_chat_type_and_target_info
 from src.chat.planner_actions.action_manager import ActionManager
 from src.chat.message_receive.chat_stream import get_chat_manager
@@ -291,14 +292,16 @@ class BrainPlanner:
             limit=int(global_config.chat.max_context_size * 0.6),
             filter_intercept_message_level=1,
         )
-        message_id_list: list[Tuple[str, "DatabaseMessages"]] = []
-        chat_content_block, message_id_list = build_readable_messages_with_id(
+        multimodal_context = build_multimodal_context(
             messages=message_list_before_now,
             timestamp_mode="normal_no_YMD",
             read_mark=self.last_obs_time_mark,
             truncate=True,
             show_actions=True,
+            strict_image=global_config.chat.enable_direct_vision_context,
         )
+        message_id_list: list[Tuple[str, "DatabaseMessages"]] = multimodal_context.message_id_list
+        chat_content_block = multimodal_context.readable_context
 
         message_list_before_now_short = message_list_before_now[-int(global_config.chat.max_context_size * 0.3) :]
         chat_content_block_short, message_id_list_short = build_readable_messages_with_id(
@@ -334,12 +337,22 @@ class BrainPlanner:
         prompt_build_ms = (time.perf_counter() - prompt_build_start) * 1000
 
         # 调用LLM获取决策
+        multimodal_message_factory = None
+        if global_config.chat.enable_direct_vision_context:
+            multimodal_message_factory = make_message_factory(
+                system_prompt=prompt,
+                message_id_list=message_id_list,
+                prefix_text="以下是按时间顺序整理的聊天上下文（包含图片）：\n",
+                strict_image=True,
+            )
+
         reasoning, actions, llm_raw_output, llm_reasoning, llm_duration_ms = await self._execute_main_planner(
             prompt=prompt,
             message_id_list=message_id_list,
             filtered_actions=filtered_actions,
             available_actions=available_actions,
             loop_start_time=loop_start_time,
+            multimodal_message_factory=multimodal_message_factory,
         )
 
         # 记录和展示计划日志
@@ -540,6 +553,7 @@ class BrainPlanner:
         filtered_actions: Dict[str, ActionInfo],
         available_actions: Dict[str, ActionInfo],
         loop_start_time: float,
+        multimodal_message_factory=None,
     ) -> Tuple[str, List[ActionPlannerInfo], Optional[str], Optional[str], Optional[float]]:
         """执行主规划器"""
         llm_content = None
@@ -551,7 +565,12 @@ class BrainPlanner:
         try:
             # 调用LLM
             llm_start = time.perf_counter()
-            llm_content, (reasoning_content, _, _) = await self.planner_llm.generate_response_async(prompt=prompt)
+            if multimodal_message_factory is not None:
+                llm_content, (reasoning_content, _, _) = await self.planner_llm.generate_response_with_message_async(
+                    message_factory=multimodal_message_factory
+                )
+            else:
+                llm_content, (reasoning_content, _, _) = await self.planner_llm.generate_response_async(prompt=prompt)
             llm_duration_ms = (time.perf_counter() - llm_start) * 1000
             llm_reasoning = reasoning_content
 
