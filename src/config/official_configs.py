@@ -734,6 +734,14 @@ class ExperimentalConfig(ConfigBase):
 
 
 @dataclass
+class PromptConfig(ConfigBase):
+    """内置提示词覆盖配置"""
+
+    prompt_overrides: dict[str, str] = field(default_factory=dict)
+    """内置提示词覆盖表，key 为提示词名称，value 为覆盖内容"""
+
+
+@dataclass
 class MaimMessageConfig(ConfigBase):
     """maim_message配置类"""
 

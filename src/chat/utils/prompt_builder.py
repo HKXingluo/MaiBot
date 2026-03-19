@@ -117,7 +117,11 @@ class PromptManager:
             # logger.debug(f"从全局获取提示词: {name}")
             if name not in self._prompts:
                 raise KeyError(f"Prompt '{name}' not found")
-            return self._prompts[name]
+            prompt = self._prompts[name]
+            override_text = get_prompt_override(name)
+            if override_text:
+                return Prompt(override_text, name=name, _should_register=False)
+            return prompt
 
     def generate_name(self, template: str) -> str:
         """为未命名的prompt生成名称"""
@@ -142,6 +146,21 @@ class PromptManager:
 
 # 全局单例
 global_prompt_manager = PromptManager()
+
+
+def get_prompt_override(name: str) -> str:
+    """从配置中读取提示词覆盖内容。"""
+    try:
+        from src.config.config import global_config
+
+        prompt_cfg = getattr(global_config, "prompt", None)
+        if not prompt_cfg:
+            return ""
+        overrides = getattr(prompt_cfg, "prompt_overrides", {}) or {}
+        value = overrides.get(name, "")
+        return value if isinstance(value, str) else ""
+    except Exception:
+        return ""
 
 
 class Prompt(str):
