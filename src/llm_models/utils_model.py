@@ -136,6 +136,7 @@ class LLMRequest:
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         raise_when_empty: bool = True,
+        preferred_model_name: Optional[str] = None,
     ) -> Tuple[str, Tuple[str, str, Optional[List[ToolCall]]]]:
         """
         异步生成响应
@@ -163,6 +164,7 @@ class LLMRequest:
             temperature=temperature,
             max_tokens=max_tokens,
             tool_options=tool_built,
+            preferred_model_name=preferred_model_name,
         )
 
         logger.debug(f"LLM请求总耗时: {time.time() - start_time}")
@@ -192,6 +194,7 @@ class LLMRequest:
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         raise_when_empty: bool = True,
+        preferred_model_name: Optional[str] = None,
     ) -> Tuple[str, Tuple[str, str, Optional[List[ToolCall]]]]:
         """
         异步生成响应
@@ -214,6 +217,7 @@ class LLMRequest:
             temperature=temperature,
             max_tokens=max_tokens,
             tool_options=tool_built,
+            preferred_model_name=preferred_model_name,
         )
 
         time_cost = time.time() - start_time
@@ -456,6 +460,7 @@ class LLMRequest:
         max_tokens: Optional[int] = None,
         embedding_input: str | None = None,
         audio_base64: str | None = None,
+        preferred_model_name: Optional[str] = None,
     ) -> Tuple[APIResponse, ModelInfo]:
         """
         调度器函数，负责模型选择、故障切换。
@@ -464,8 +469,23 @@ class LLMRequest:
         max_attempts = len(self.model_for_task.model_list)
         last_exception: Optional[Exception] = None
 
+        if preferred_model_name:
+            preferred_model_name = preferred_model_name.strip()
+            if preferred_model_name not in self.model_for_task.model_list:
+                logger.warning(
+                    f"任务 {self.task_name} 指定的模型 {preferred_model_name} 不在可用列表中，回退自动选择。"
+                )
+                preferred_model_name = None
+
         for _ in range(max_attempts):
-            model_info, api_provider, client = self._select_model(exclude_models=failed_models_this_request)
+            if preferred_model_name and preferred_model_name not in failed_models_this_request:
+                model_info = model_config.get_model_info(preferred_model_name)
+                api_provider = model_config.get_provider(model_info.api_provider)
+                force_new_client = self.request_type == "embedding"
+                client = client_registry.get_client_class_instance(api_provider, force_new=force_new_client)
+                logger.debug(f"使用指定模型: {preferred_model_name}")
+            else:
+                model_info, api_provider, client = self._select_model(exclude_models=failed_models_this_request)
 
             message_list = []
             if message_factory:

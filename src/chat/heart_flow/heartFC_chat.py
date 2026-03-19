@@ -654,6 +654,7 @@ class HeartFChatting:
                     # 从 Planner 的 action_data 中提取未知词语列表（仅在 reply 时使用）
                     unknown_words = None
                     quote_message = None
+                    preferred_model_name = None
                     if isinstance(action_planner_info.action_data, dict):
                         uw = action_planner_info.action_data.get("unknown_words")
                         if isinstance(uw, list):
@@ -678,6 +679,11 @@ class HeartFChatting:
                                 quote_message = bool(qm)
                                 
                         logger.info(f"{self.log_prefix} {qm}引用回复设置: {quote_message}")
+                        selected_model = action_planner_info.action_data.get("model_name")
+                        if isinstance(selected_model, str):
+                            selected_model = selected_model.strip()
+                            if selected_model:
+                                preferred_model_name = selected_model
 
                     success, llm_response = await generator_api.generate_reply(
                         chat_stream=self.chat_stream,
@@ -691,6 +697,7 @@ class HeartFChatting:
                         from_plugin=False,
                         reply_time_point=action_planner_info.action_data.get("loop_start_time", time.time()),
                         think_level=think_level,
+                        preferred_model_name=preferred_model_name,
                     )
 
                     if not success or not llm_response or not llm_response.reply_set:
