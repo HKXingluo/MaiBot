@@ -95,6 +95,7 @@ async def generate_reply(
     request_type: str = "generator_api",
     from_plugin: bool = True,
     reply_time_point: Optional[float] = None,
+    preferred_model_name: Optional[str] = None,
 ) -> Tuple[bool, Optional["LLMGenerationDataModel"]]:
     """生成回复
 
@@ -164,6 +165,7 @@ async def generate_reply(
             stream_id=chat_stream.stream_id if chat_stream else chat_id,
             reply_time_point=reply_time_point,
             log_reply=False,
+            preferred_model_name=preferred_model_name,
         )
         if not success:
             logger.warning("[GeneratorAPI] 回复生成失败")

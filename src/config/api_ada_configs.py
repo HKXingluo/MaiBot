@@ -54,6 +54,9 @@ class ModelInfo(ConfigBase):
     api_provider: str
     """API提供商（如OpenAI、Azure等）"""
 
+    description: str = ""
+    """模型简介（用于前端展示与决策模型选择）"""
+
     price_in: float = field(default=0.0)
     """每M token输入价格"""
 

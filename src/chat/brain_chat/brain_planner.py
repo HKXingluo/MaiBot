@@ -13,7 +13,7 @@ from src.config.config import global_config, model_config
 from src.common.logger import get_logger
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
 from src.common.data_models.info_data_model import ActionPlannerInfo
-from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
+from src.chat.utils.prompt_builder import Prompt, global_prompt_manager, get_prompt_override
 from src.chat.utils.chat_message_builder import (
     build_readable_actions,
     get_actions_by_timestamp_with_chat,
@@ -53,9 +53,13 @@ def init_prompt():
 reply
 动作描述：
 进行回复，你可以自然的顺着正在进行的聊天内容进行回复或自然的提出一个问题
+你可以在 model_name 中指定本次回复模型，必须从“可用回复模型”中选择
+**可用回复模型**
+{reply_models_block}
 {{
     "action": "reply",
     "target_message_id":"想要回复的消息id",
+    "model_name":"可选，指定回复模型名",
     "reason":"回复的原因"
 }}
 
@@ -185,6 +189,22 @@ class BrainPlanner:
             logger.debug(f"{self.log_prefix}解析动作JSON: action={action}, json={action_json}")
             reasoning = action_json.get("reason", "未提供原因")
             action_data = {key: value for key, value in action_json.items() if key not in ["action", "reason"]}
+            if "model_name" in action_data:
+                model_name = action_data.get("model_name")
+                if action != "reply":
+                    action_data.pop("model_name", None)
+                elif not isinstance(model_name, str) or not model_name.strip():
+                    action_data.pop("model_name", None)
+                else:
+                    model_name = model_name.strip()
+                    allowed_models = set(model_config.model_task_config.replyer.model_list)
+                    if model_name not in allowed_models:
+                        logger.warning(
+                            f"{self.log_prefix}Planner 指定了无效 reply 模型: {model_name}，可用模型: {sorted(allowed_models)}"
+                        )
+                        action_data.pop("model_name", None)
+                    else:
+                        action_data["model_name"] = model_name
             # 非complete_talk动作需要target_message_id
             target_message = None
 
@@ -383,7 +403,9 @@ class BrainPlanner:
             action_options_block = await self._build_action_options_block(current_available_actions)
 
             # 其他信息
-            moderation_prompt_block = "请不要输出违法违规内容，不要输出色情，暴力，政治相关内容，如有敏感内容，请规避。"
+            moderation_prompt_block = get_prompt_override("moderation_prompt.brain_planner") or (
+                "请不要输出违法违规内容，不要输出色情，暴力，政治相关内容，如有敏感内容，请规避。"
+            )
             time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             bot_name = global_config.bot.nickname
             bot_nickname = (
@@ -393,11 +415,13 @@ class BrainPlanner:
 
             # 获取主规划器模板并填充
             planner_prompt_template = await global_prompt_manager.get_prompt_async(prompt_key)
+            reply_models_block = self._build_reply_models_block()
             prompt = planner_prompt_template.format(
                 time_block=time_block,
                 chat_context_description=chat_context_description,
                 chat_content_block=chat_content_block,
                 actions_before_now_block=actions_before_now_block,
+                reply_models_block=reply_models_block,
                 action_options_text=action_options_block,
                 moderation_prompt=moderation_prompt_block,
                 name_block=name_block,
@@ -494,6 +518,20 @@ class BrainPlanner:
             action_options_block += using_action_prompt
 
         return action_options_block
+
+    def _build_reply_models_block(self) -> str:
+        model_names = model_config.model_task_config.replyer.model_list
+        if not model_names:
+            return "（未配置 replyer 模型）"
+        lines: List[str] = []
+        for name in model_names:
+            try:
+                info = model_config.get_model_info(name)
+                desc = (getattr(info, "description", "") or "").strip()
+                lines.append(f"- {name}: {desc or '无简介'}")
+            except Exception:
+                lines.append(f"- {name}: 无法读取模型详情")
+        return "\n".join(lines)
 
     async def _execute_main_planner(
         self,

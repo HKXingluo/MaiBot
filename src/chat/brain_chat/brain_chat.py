@@ -602,6 +602,7 @@ class BrainChatting:
                     try:
                         # 从 Planner 的 action_data 中提取未知词语列表（仅在 reply 时使用）
                         unknown_words = None
+                        preferred_model_name = None
                         if isinstance(action_planner_info.action_data, dict):
                             uw = action_planner_info.action_data.get("unknown_words")
                             if isinstance(uw, list):
@@ -613,6 +614,11 @@ class BrainChatting:
                                             cleaned_uw.append(s)
                                 if cleaned_uw:
                                     unknown_words = cleaned_uw
+                            selected_model = action_planner_info.action_data.get("model_name")
+                            if isinstance(selected_model, str):
+                                selected_model = selected_model.strip()
+                                if selected_model:
+                                    preferred_model_name = selected_model
 
                         success, llm_response = await generator_api.generate_reply(
                             chat_stream=self.chat_stream,
@@ -624,6 +630,7 @@ class BrainChatting:
                             enable_tool=global_config.tool.enable_tool,
                             request_type="replyer",
                             from_plugin=False,
+                            preferred_model_name=preferred_model_name,
                         )
 
                         if not success or not llm_response or not llm_response.reply_set:

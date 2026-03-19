@@ -12,7 +12,7 @@ from src.config.config import global_config, model_config
 from src.common.logger import get_logger
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
 from src.common.data_models.info_data_model import ActionPlannerInfo
-from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
+from src.chat.utils.prompt_builder import Prompt, global_prompt_manager, get_prompt_override
 from src.chat.utils.chat_message_builder import (
     build_readable_messages_with_id,
     get_raw_msg_before_timestamp_with_chat,
@@ -54,6 +54,9 @@ reply
 5.不要单独对表情包进行回复
 6.将上下文中所有含义不明的，疑似黑话的，缩写词均写入unknown_words中
 7.如果你对上下文存在疑问，有需要查询的问题，写入question中
+8.你可以在 model_name 中指定这次回复要使用的模型，模型名必须从“可用回复模型”中选择
+**可用回复模型**
+{reply_models_block}
 {reply_action_example}
 
 no_reply
@@ -242,6 +245,24 @@ class ActionPlanner:
                     # 如果不是字符串类型，记录警告并移除
                     logger.warning(f"{self.log_prefix}question 格式不正确，应为字符串类型，已忽略")
                     action_data.pop("question", None)
+
+            # 验证和清理 model_name（仅 reply 动作生效）
+            if "model_name" in action_data:
+                model_name = action_data.get("model_name")
+                if action != "reply":
+                    action_data.pop("model_name", None)
+                elif not isinstance(model_name, str) or not model_name.strip():
+                    action_data.pop("model_name", None)
+                else:
+                    model_name = model_name.strip()
+                    allowed_models = set(model_config.model_task_config.replyer.model_list)
+                    if model_name not in allowed_models:
+                        logger.warning(
+                            f"{self.log_prefix}Planner 指定了无效 reply 模型: {model_name}，可用模型: {sorted(allowed_models)}"
+                        )
+                        action_data.pop("model_name", None)
+                    else:
+                        action_data["model_name"] = model_name
             
             # 非no_reply动作需要target_message_id
             target_message = None
@@ -511,7 +532,9 @@ class ActionPlanner:
             action_options_block = await self._build_action_options_block(current_available_actions)
 
             # 其他信息
-            moderation_prompt_block = "请不要输出违法违规内容，不要输出色情，暴力，政治相关内容，如有敏感内容，请规避。"
+            moderation_prompt_block = get_prompt_override("moderation_prompt.planner") or (
+                "请不要输出违法违规内容，不要输出色情，暴力，政治相关内容，如有敏感内容，请规避。"
+            )
             time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             bot_name = global_config.bot.nickname
             bot_nickname = (
@@ -527,6 +550,7 @@ class ActionPlanner:
                     reply_action_example += "5.如果要明确回复消息，使用quote，如果消息不多不需要明确回复，设置quote为false\n"
                 reply_action_example += (
                     '{{"action":"reply", "target_message_id":"消息id(m+数字)", '
+                    '"model_name":"可选，指定回复模型名", '
                     '"unknown_words":["词语1","词语2"], '
                     '"question":"需要查询的问题"'
                 )
@@ -542,6 +566,7 @@ class ActionPlanner:
                 reply_action_example += (
                     '{{"action":"reply", "think_level":数值等级(0或1), '
                     '"target_message_id":"消息id(m+数字)", '
+                    '"model_name":"可选，指定回复模型名", '
                     '"unknown_words":["词语1","词语2"], '
                     '"question":"需要查询的问题"'
                 )
@@ -550,11 +575,13 @@ class ActionPlanner:
                 reply_action_example += "}"
 
             planner_prompt_template = await global_prompt_manager.get_prompt_async("planner_prompt")
+            reply_models_block = self._build_reply_models_block()
             prompt = planner_prompt_template.format(
                 time_block=time_block,
                 chat_context_description=chat_context_description,
                 chat_content_block=chat_content_block,
                 actions_before_now_block=actions_before_now_block,
+                reply_models_block=reply_models_block,
                 action_options_text=action_options_block,
                 moderation_prompt=moderation_prompt_block,
                 name_block=name_block,
@@ -657,6 +684,21 @@ class ActionPlanner:
             action_options_block += using_action_prompt
 
         return action_options_block
+
+    def _build_reply_models_block(self) -> str:
+        """构建供 planner 选择的 reply 模型列表（含简介）。"""
+        model_names = model_config.model_task_config.replyer.model_list
+        if not model_names:
+            return "（未配置 replyer 模型）"
+        lines: List[str] = []
+        for name in model_names:
+            try:
+                info = model_config.get_model_info(name)
+                desc = (getattr(info, "description", "") or "").strip()
+                lines.append(f"- {name}: {desc or '无简介'}")
+            except Exception:
+                lines.append(f"- {name}: 无法读取模型详情")
+        return "\n".join(lines)
 
     async def _execute_main_planner(
         self,
