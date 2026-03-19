@@ -24,6 +24,7 @@ from src.config.official_configs import (
     ResponsePostProcessConfig,
     ResponseSplitterConfig,
     TelemetryConfig,
+    PromptConfig,
     ExperimentalConfig,
     MaimMessageConfig,
     LPMMKnowledgeConfig,
@@ -105,6 +106,7 @@ async def get_config_section_schema(section_name: str, _auth: bool = Depends(req
     - response_post_process: ResponsePostProcessConfig
     - response_splitter: ResponseSplitterConfig
     - telemetry: TelemetryConfig
+    - prompt: PromptConfig
     - experimental: ExperimentalConfig
     - maim_message: MaimMessageConfig
     - lpmm_knowledge: LPMMKnowledgeConfig
@@ -130,6 +132,7 @@ async def get_config_section_schema(section_name: str, _auth: bool = Depends(req
         "response_post_process": ResponsePostProcessConfig,
         "response_splitter": ResponseSplitterConfig,
         "telemetry": TelemetryConfig,
+        "prompt": PromptConfig,
         "experimental": ExperimentalConfig,
         "maim_message": MaimMessageConfig,
         "lpmm_knowledge": LPMMKnowledgeConfig,
